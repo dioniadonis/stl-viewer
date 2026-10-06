@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#0a0f18" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="STL Viewer" />
+  <title>STL Viewer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0f18;
+      --panel: rgba(15, 22, 34, .86);
+      --line: rgba(255,255,255,.12);
+      --text: #f4f7fb;
+      --muted: #aab5c4;
+      --accent: #54b9ff;
+      --danger: #ff6b78;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); }
+    body { overscroll-behavior: none; touch-action: none; }
+    #viewer { position: fixed; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    .topbar {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      left: 12px;
+      right: 12px;
+      z-index: 10;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      pointer-events: none;
+    }
+    .brand {
+      pointer-events: auto;
+      min-width: 0;
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 8px 26px rgba(0,0,0,.25);
+    }
+    .brand strong { display: block; font-size: 14px; line-height: 1.1; }
+    .brand span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    button, .fileButton {
+      appearance: none;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      color: var(--text);
+      min-height: 44px;
+      padding: 0 14px;
+      font: inherit;
+      font-weight: 650;
+      font-size: 13px;
+      cursor: pointer;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    button:active, .fileButton:active { transform: scale(.98); }
+    .fileButton { pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; background: #1677ff; border-color: transparent; }
+    #fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+    .hud {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      z-index: 10;
+      display: grid;
+      gap: 10px;
+      pointer-events: none;
+    }
+    .stats {
+      pointer-events: auto;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 12px;
+      align-items: center;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 8px 26px rgba(0,0,0,.25);
+    }
+    .stats .label { color: var(--muted); font-size: 11px; }
+    .stats .value { font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+    .controls { pointer-events: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .controls button { min-width: 0; padding: 0 8px; }
+    button.active { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); background: rgba(84,185,255,.16); }
+
+    .empty {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      z-index: 4;
+      pointer-events: none;
+      padding: 26px;
+      text-align: center;
+    }
+    .emptyCard {
+      max-width: 380px;
+      padding: 22px 18px;
+      border: 1px dashed rgba(255,255,255,.18);
+      border-radius: 18px;
+      background: rgba(10,15,24,.5);
+    }
+    .empty .cube { font-size: 40px; margin-bottom: 8px; }
+    .empty h1 { margin: 0; font-size: 20px; }
+    .empty p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+    .toast {
+      position: fixed;
+      z-index: 20;
+      left: 50%;
+      top: calc(max(12px, env(safe-area-inset-top)) + 68px);
+      transform: translateX(-50%) translateY(-6px);
+      max-width: calc(100vw - 24px);
+      padding: 9px 12px;
+      border-radius: 12px;
+      background: rgba(12,18,28,.94);
+      border: 1px solid var(--line);
+      color: var(--text);
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: .2s ease;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.error { border-color: rgba(255,107,120,.45); color: #ffd8dc; }
+
+    @media (min-width: 700px) {
+      .topbar { max-width: 760px; margin: 0 auto; }
+      .hud { width: 420px; left: 50%; right: auto; transform: translateX(-50%); }
+    }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script>
+    // If the 3D engine never loads (offline, blocked CDN, opened in a file preview), say so instead of showing a dead page.
+    setTimeout(function () {
+      if (window.__viewerReady) return;
+      var el = document.getElementById('fileName');
+      if (el) el.textContent = '3D engine failed to load — open this page in Safari/Chrome with internet';
+    }, 6000);
+  </script>
+</head>
+<body>
+  <div id="viewer"></div>
+
+  <div class="topbar">
+    <div class="brand">
+      <strong>STL Viewer</strong>
+      <span id="fileName">No model loaded</span>
+    </div>
+    <label class="fileButton" for="fileInput">Open STL</label>
+    <!-- No "accept" filter: iOS doesn't recognise .stl as a type and greys the files out. The .stl check happens in code. -->
+    <input id="fileInput" type="file" />
+  </div>
+
+  <div class="empty" id="emptyState">
+    <div class="emptyCard">
+      <div class="cube">⬡</div>
+      <h1>Open an STL</h1>
+      <p>Tap <b>Open STL</b> and choose a file from your iPhone. One finger rotates; two fingers zoom and pan.</p>
+    </div>
+  </div>
+
+  <div class="hud">
+    <div class="stats">
+      <span class="label">Size</span><span class="value" id="dimensions">—</span>
+      <span class="label">Triangles</span><span class="value" id="triangles">—</span>
+    </div>
+    <div class="controls">
+      <button id="resetBtn">Reset</button>
+      <button id="wireBtn">Wireframe</button>
+      <button id="gridBtn" class="active">Grid</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+
+    const viewer = document.getElementById('viewer');
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const emptyState = document.getElementById('emptyState');
+    const dimensions = document.getElementById('dimensions');
+    const triangles = document.getElementById('triangles');
+    const resetBtn = document.getElementById('resetBtn');
+    const wireBtn = document.getElementById('wireBtn');
+    const gridBtn = document.getElementById('gridBtn');
+    const toast = document.getElementById('toast');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0f18);
+
+    const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.01, 100000);
+    camera.position.set(3, 2.4, 3);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    viewer.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.screenSpacePanning = true;
+    controls.minDistance = 0.001;
+    controls.maxDistance = 100000;
+    controls.touches.ONE = THREE.TOUCH.ROTATE;
+    controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x253047, 2.3));
+    const key = new THREE.DirectionalLight(0xffffff, 3.4);
+    key.position.set(4, 7, 5);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x7dbdff, 1.4);
+    fill.position.set(-5, 2, -4);
+    scene.add(fill);
+
+    const grid = new THREE.GridHelper(10, 20, 0x416278, 0x243443);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.7;
+    scene.add(grid);
+
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xb7c8d8,
+      metalness: 0.1,
+      roughness: 0.58,
+      side: THREE.DoubleSide
+    });
+
+    let mesh = null;
+    let modelRadius = 1;
+    let toastTimer = null;
+
+    function notify(message, error = false) {
+      clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.toggle('error', error);
+      toast.classList.add('show');
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+    }
+
+    function disposeMesh() {
+      if (!mesh) return;
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh = null;
+    }
+
+    function fitCamera() {
+      if (!mesh) return;
+      const box = new THREE.Box3().setFromObject(mesh);
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      modelRadius = Math.max(sphere.radius, 0.001);
+      const fov = THREE.MathUtils.degToRad(camera.fov);
+      const distance = modelRadius / Math.sin(fov / 2) * 1.15;
+      camera.near = Math.max(distance / 1000, 0.001);
+      camera.far = Math.max(distance * 100, 1000);
+      camera.updateProjectionMatrix();
+      // Aim at the model's center, not the floor it sits on.
+      const c = sphere.center;
+      camera.position.set(c.x + distance * 0.9, c.y + distance * 0.65, c.z + distance * 0.9);
+      controls.target.copy(c);
+      controls.minDistance = modelRadius * 0.05;
+      controls.maxDistance = modelRadius * 60;
+      controls.update();
+
+      const gridSize = modelRadius * 4;
+      grid.scale.setScalar(Math.max(gridSize / 10, 0.001));
+    }
+
+    function loadGeometry(geometry, name) {
+      disposeMesh();
+      geometry.computeBoundingBox();
+
+      // Size in the file's own axes (X × Y × Z, as a slicer would show it).
+      const originalSize = new THREE.Vector3();
+      geometry.boundingBox.getSize(originalSize);
+
+      // STL files are Z-up; three.js is Y-up. Rotate so models stand upright instead of lying on their back.
+      geometry.rotateX(-Math.PI / 2);
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+
+      // Center on X/Z and put the lowest point on the grid.
+      const box = geometry.boundingBox;
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      geometry.translate(-center.x, -box.min.y, -center.z);
+      geometry.computeBoundingBox();
+
+      mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+
+      fileName.textContent = name;
+      emptyState.style.display = 'none';
+      dimensions.textContent = `${fmt(originalSize.x)} × ${fmt(originalSize.y)} × ${fmt(originalSize.z)}`;
+      triangles.textContent = Math.floor(geometry.attributes.position.count / 3).toLocaleString();
+      fitCamera();
+      notify('STL loaded');
+    }
+
+    function fmt(n) {
+      if (!Number.isFinite(n)) return '—';
+      const abs = Math.abs(n);
+      if (abs >= 1000) return n.toFixed(0);
+      if (abs >= 100) return n.toFixed(1);
+      if (abs >= 10) return n.toFixed(2);
+      return n.toFixed(3).replace(/\.?0+$/, '');
+    }
+
+    async function openFile(file) {
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.stl')) {
+        notify('Choose an .stl file', true);
+        return;
+      }
+      try {
+        fileName.textContent = `Loading ${file.name}…`;
+        const data = await file.arrayBuffer();
+        const loader = new STLLoader();
+        const geometry = loader.parse(data);
+        if (!geometry?.attributes?.position?.count) throw new Error('No triangles found');
+        loadGeometry(geometry, file.name);
+      } catch (err) {
+        console.error(err);
+        fileName.textContent = 'Could not load STL';
+        notify('That STL could not be opened', true);
+      } finally {
+        fileInput.value = '';
+      }
+    }
+
+    fileInput.addEventListener('change', (e) => openFile(e.target.files?.[0]));
+
+    resetBtn.addEventListener('click', () => fitCamera());
+    wireBtn.addEventListener('click', () => {
+      material.wireframe = !material.wireframe;
+      wireBtn.classList.toggle('active', material.wireframe);
+    });
+    gridBtn.addEventListener('click', () => {
+      grid.visible = !grid.visible;
+      gridBtn.classList.toggle('active', grid.visible);
+    });
+
+    // Desktop convenience: drag and drop STL files.
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      openFile(e.dataTransfer?.files?.[0]);
+    });
+
+    function resize() {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    }
+    addEventListener('resize', resize);
+    addEventListener('orientationchange', () => setTimeout(resize, 120));
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+    window.__viewerReady = true;
+  </script>
+</body>
+</html>
